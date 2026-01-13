@@ -1,0 +1,12 @@
+{
+    "agents": [
+        "gemini"
+    ],
+    "editors": [
+        "gemini"
+    ],
+    "guidelines": [
+        "laravel/fortify"
+    ],
+    "herd_mcp": true
+}
