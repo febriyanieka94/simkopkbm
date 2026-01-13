@@ -35,6 +35,17 @@ new class extends Component {
     public string $mother_name = '';
     public string $guardian_name = '';
     public string $guardian_phone = '';
+    public ?int $birth_order = null;
+    public ?int $total_siblings = null;
+    public string $previous_school = '';
+    public string $status = 'baru';
+
+    // Periodic Data fields
+    public float $weight = 0;
+    public float $height = 0;
+    public float $head_circumference = 0;
+    public int $semester = 1;
+    public ?int $current_academic_year_id = null;
 
     public ?User $editing = null;
     public ?string $existingPhoto = null;
@@ -56,7 +67,16 @@ new class extends Component {
             'mother_name' => ['nullable', 'string', 'max:255'],
             'guardian_name' => ['nullable', 'string', 'max:255'],
             'guardian_phone' => ['nullable', 'string', 'max:20'],
+            'birth_order' => ['nullable', 'integer', 'min:1'],
+            'total_siblings' => ['nullable', 'integer', 'min:1'],
+            'previous_school' => ['nullable', 'string', 'max:255'],
+            'status' => ['required', 'in:baru,mutasi,naik_kelas,lulus,keluar'],
         ];
+    }
+
+    public function mount(): void
+    {
+        $this->current_academic_year_id = \App\Models\AcademicYear::where('is_active', true)->first()?->id;
     }
 
     public function save(): void
@@ -86,6 +106,10 @@ new class extends Component {
                 'guardian_name' => $this->guardian_name,
                 'guardian_phone' => $this->guardian_phone,
                 'classroom_id' => $this->classroom_id,
+                'birth_order' => $this->birth_order,
+                'total_siblings' => $this->total_siblings,
+                'previous_school' => $this->previous_school,
+                'status' => $this->status,
             ];
 
             if ($this->editing) {
@@ -114,7 +138,7 @@ new class extends Component {
             }
         });
 
-        $this->reset(['name', 'email', 'nis', 'nisn', 'phone', 'address', 'dob', 'pob', 'classroom_id', 'photo', 'father_name', 'mother_name', 'guardian_name', 'guardian_phone', 'editing', 'existingPhoto']);
+        $this->reset(['name', 'email', 'nis', 'nisn', 'phone', 'address', 'dob', 'pob', 'classroom_id', 'photo', 'father_name', 'mother_name', 'guardian_name', 'guardian_phone', 'birth_order', 'total_siblings', 'previous_school', 'status', 'editing', 'existingPhoto']);
         $this->dispatch('close-modal', 'student-modal');
     }
 
@@ -137,8 +161,40 @@ new class extends Component {
         $this->guardian_name = $profile->guardian_name ?? '';
         $this->guardian_phone = $profile->guardian_phone ?? '';
         $this->classroom_id = $profile->classroom_id;
+        $this->birth_order = $profile->birth_order;
+        $this->total_siblings = $profile->total_siblings;
+        $this->previous_school = $profile->previous_school ?? '';
+        $this->status = $profile->status ?? 'baru';
 
         $this->dispatch('open-modal', 'student-modal');
+    }
+
+    public function savePeriodic(int $studentProfileId): void
+    {
+        $this->validate([
+            'weight' => 'required|numeric|min:0',
+            'height' => 'required|numeric|min:0',
+            'head_circumference' => 'required|numeric|min:0',
+            'semester' => 'required|integer|in:1,2',
+        ]);
+
+        \App\Models\StudentPeriodicRecord::updateOrCreate(
+            [
+                'student_profile_id' => $studentProfileId,
+                'academic_year_id' => $this->current_academic_year_id,
+                'semester' => $this->semester,
+            ],
+            [
+                'weight' => $this->weight,
+                'height' => $this->height,
+                'head_circumference' => $this->head_circumference,
+                'recorded_by' => auth()->id(),
+            ]
+        );
+
+        $this->reset(['weight', 'height', 'head_circumference', 'semester']);
+        $this->dispatch('close-modal', 'periodic-modal');
+        $this->dispatch('notify', 'Data periodik berhasil disimpan.');
     }
 
     public function delete(User $user): void
@@ -236,6 +292,9 @@ new class extends Component {
                             </div>
                         </td>
                         <td class="px-4 py-3 text-right space-x-2">
+                            <flux:modal.trigger name="periodic-modal">
+                                <flux:button size="sm" variant="ghost" icon="chart-bar" wire:click="edit({{ $student->id }})" tooltip="Data Periodik" />
+                            </flux:modal.trigger>
                             <flux:button size="sm" variant="ghost" icon="pencil-square" wire:click="edit({{ $student->id }})" />
                             <flux:button size="sm" variant="ghost" icon="trash" class="text-red-500" wire:confirm="Yakin ingin menghapus siswa ini?" wire:click="delete({{ $student->id }})" />
                         </td>
@@ -313,6 +372,21 @@ new class extends Component {
                         </flux:select>
                         
                         <flux:textarea wire:model="address" label="Alamat" resize="none" rows="3" />
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <flux:input type="number" wire:model="birth_order" label="Anak Ke-" />
+                            <flux:input type="number" wire:model="total_siblings" label="Dari ... Bersaudara" />
+                        </div>
+
+                        <flux:input wire:model="previous_school" label="Asal Sekolah" />
+                        
+                        <flux:select wire:model="status" label="Status Siswa">
+                            <option value="baru">Baru</option>
+                            <option value="mutasi">Mutasi / Pindahan</option>
+                            <option value="naik_kelas">Naik Kelas</option>
+                            <option value="lulus">Lulus</option>
+                            <option value="keluar">Keluar</option>
+                        </flux:select>
                     </div>
 
                     <div class="space-y-4">
@@ -338,6 +412,33 @@ new class extends Component {
                     <span wire:loading.remove>Simpan</span>
                     <span wire:loading>Menyimpan...</span>
                 </flux:button>
+            </div>
+        </form>
+    </flux:modal>
+
+    <flux:modal name="periodic-modal" class="max-w-md">
+        <form wire:submit.prevent="savePeriodic({{ $editing?->latestProfile?->profileable_id ?? 0 }})" class="space-y-6">
+            <div>
+                <flux:heading size="lg">Data Periodik Siswa</flux:heading>
+                <flux:subheading>Input data berat badan, tinggi, dan lingkar kepala.</flux:subheading>
+            </div>
+
+            <div class="space-y-4">
+                <flux:select wire:model="semester" label="Semester">
+                    <option value="1">Ganjil (1)</option>
+                    <option value="2">Genap (2)</option>
+                </flux:select>
+
+                <flux:input type="number" step="0.1" wire:model="weight" label="Berat Badan (kg)" suffix="kg" />
+                <flux:input type="number" step="0.1" wire:model="height" label="Tinggi Badan (cm)" suffix="cm" />
+                <flux:input type="number" step="0.1" wire:model="head_circumference" label="Lingkar Kepala (cm)" suffix="cm" />
+            </div>
+
+            <div class="flex justify-end gap-2">
+                <flux:modal.close>
+                    <flux:button variant="ghost">Batal</flux:button>
+                </flux:modal.close>
+                <flux:button type="submit" variant="primary">Simpan Data</flux:button>
             </div>
         </form>
     </flux:modal>

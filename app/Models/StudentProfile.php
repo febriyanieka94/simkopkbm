@@ -7,25 +7,31 @@ use Illuminate\Database\Eloquent\Model;
 class StudentProfile extends Model
 {
     protected $fillable = [
-        'nis', 
-        'nisn', 
-        'phone', 
-        'address', 
-        'dob', 
-        'pob', 
+        'nis',
+        'nisn',
+        'phone',
+        'address',
+        'dob',
+        'pob',
         'photo',
         'father_name',
         'mother_name',
         'guardian_name',
         'guardian_phone',
-        'parent_id', 
-        'classroom_id'
+        'parent_id',
+        'classroom_id',
+        'birth_order',
+        'total_siblings',
+        'previous_school',
+        'status',
     ];
 
     protected function casts(): array
     {
         return [
             'dob' => 'date',
+            'birth_order' => 'integer',
+            'total_siblings' => 'integer',
         ];
     }
 
@@ -42,5 +48,10 @@ class StudentProfile extends Model
     public function classroom()
     {
         return $this->belongsTo(Classroom::class);
+    }
+
+    public function periodicRecords()
+    {
+        return $this->hasMany(StudentPeriodicRecord::class);
     }
 }
