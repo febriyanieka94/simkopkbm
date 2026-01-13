@@ -73,17 +73,23 @@ new class extends Component
 
     public ?string $existingPhoto = null;
 
+    public bool $hasExistingPeriodicData = false;
+
+    public ?string $periodicDataLastUpdated = null;
+
     public function rules(): array
     {
+        $profileId = $this->editing?->latestProfile?->profileable_id;
+        
         return [
             'name' => ['required', 'string', 'max:255'],
-            'email' => ['nullable', 'email', 'unique:users,email,'.($this->editing->id ?? 'NULL')],
-            'nis' => ['nullable', 'string', 'unique:student_profiles,nis,'.($this->editing?->latestProfile?->profileable_id ?? 'NULL')],
-            'nisn' => ['nullable', 'string', 'unique:student_profiles,nisn,'.($this->editing?->latestProfile?->profileable_id ?? 'NULL')],
+            'email' => ['required', 'email', 'unique:users,email,'.($this->editing->id ?? 'NULL')],
+            'nis' => ['nullable', 'string', $this->nis ? 'unique:student_profiles,nis,'.$profileId : ''],
+            'nisn' => ['nullable', 'string', $this->nisn ? 'unique:student_profiles,nisn,'.$profileId : ''],
             'phone' => ['nullable', 'string'],
             'address' => ['nullable', 'string'],
-            'dob' => ['nullable', 'date'],
-            'pob' => ['nullable', 'string'],
+            'dob' => ['required', 'date'],
+            'pob' => ['required', 'string'],
             'classroom_id' => ['nullable', 'exists:classrooms,id'],
             'photo' => ['nullable', 'image', 'max:1024'], // 1MB Max
             'father_name' => ['nullable', 'string', 'max:255'],
@@ -117,21 +123,21 @@ new class extends Component
             }
 
             $profileData = [
-                'nis' => $this->nis,
-                'nisn' => $this->nisn,
-                'phone' => $this->phone,
-                'address' => $this->address,
+                'nis' => $this->nis ?: null,
+                'nisn' => $this->nisn ?: null,
+                'phone' => $this->phone ?: null,
+                'address' => $this->address ?: null,
                 'dob' => $this->dob ?: null,
                 'pob' => $this->pob,
                 'photo' => $photoPath,
-                'father_name' => $this->father_name,
-                'mother_name' => $this->mother_name,
-                'guardian_name' => $this->guardian_name,
-                'guardian_phone' => $this->guardian_phone,
+                'father_name' => $this->father_name ?: null,
+                'mother_name' => $this->mother_name ?: null,
+                'guardian_name' => $this->guardian_name ?: null,
+                'guardian_phone' => $this->guardian_phone ?: null,
                 'classroom_id' => $this->classroom_id,
                 'birth_order' => $this->birth_order,
                 'total_siblings' => $this->total_siblings,
-                'previous_school' => $this->previous_school,
+                'previous_school' => $this->previous_school ?: null,
                 'status' => $this->status,
             ];
 
@@ -164,6 +170,7 @@ new class extends Component
         $this->reset(['name', 'email', 'nis', 'nisn', 'phone', 'address', 'dob', 'pob', 'classroom_id', 'photo', 'father_name', 'mother_name', 'guardian_name', 'guardian_phone', 'birth_order', 'total_siblings', 'previous_school', 'status', 'editing', 'viewing', 'existingPhoto']);
 
         session()->flash('success', 'Data siswa berhasil disimpan!');
+        $this->dispatch('student-saved');
     }
 
     public function edit(User $user): void
@@ -202,7 +209,65 @@ new class extends Component
     public function openPeriodic(User $user): void
     {
         $this->editing = $user;
+        
+        // Preload existing periodic data for current academic year and semester
+        $profile = $user->latestProfile?->profileable;
+        if ($profile) {
+            $existingRecord = \App\Models\StudentPeriodicRecord::where('student_profile_id', $profile->id)
+                ->where('academic_year_id', $this->current_academic_year_id)
+                ->where('semester', $this->semester)
+                ->first();
+            
+            if ($existingRecord) {
+                $this->weight = $existingRecord->weight;
+                $this->height = $existingRecord->height;
+                $this->head_circumference = $existingRecord->head_circumference;
+                $this->hasExistingPeriodicData = true;
+                $this->periodicDataLastUpdated = $existingRecord->updated_at->diffForHumans();
+            } else {
+                // Reset to default if no existing record
+                $this->weight = 0;
+                $this->height = 0;
+                $this->head_circumference = 0;
+                $this->hasExistingPeriodicData = false;
+                $this->periodicDataLastUpdated = null;
+            }
+        }
+        
         $this->dispatch('open-modal', 'periodic-modal');
+    }
+
+    public function updatedSemester(): void
+    {
+        if ($this->editing) {
+            $profile = $this->editing->latestProfile?->profileable;
+            if ($profile) {
+                $existingRecord = \App\Models\StudentPeriodicRecord::where('student_profile_id', $profile->id)
+                    ->where('academic_year_id', $this->current_academic_year_id)
+                    ->where('semester', $this->semester)
+                    ->first();
+                
+                if ($existingRecord) {
+                    $this->weight = $existingRecord->weight;
+                    $this->height = $existingRecord->height;
+                    $this->head_circumference = $existingRecord->head_circumference;
+                    $this->hasExistingPeriodicData = true;
+                    $this->periodicDataLastUpdated = $existingRecord->updated_at->diffForHumans();
+                } else {
+                    $this->weight = 0;
+                    $this->height = 0;
+                    $this->head_circumference = 0;
+                    $this->hasExistingPeriodicData = false;
+                    $this->periodicDataLastUpdated = null;
+                }
+            }
+        }
+    }
+
+    public function createNew(): void
+    {
+        $this->reset(['name', 'email', 'nis', 'nisn', 'phone', 'address', 'dob', 'pob', 'classroom_id', 'photo', 'father_name', 'mother_name', 'guardian_name', 'guardian_phone', 'birth_order', 'total_siblings', 'previous_school', 'status', 'editing', 'existingPhoto']);
+        $this->resetValidation();
     }
 
     public function savePeriodic(int $studentProfileId): void
@@ -228,9 +293,10 @@ new class extends Component
             ]
         );
 
-        $this->reset(['weight', 'height', 'head_circumference', 'semester']);
-        $this->dispatch('close-modal', 'periodic-modal');
-        $this->dispatch('notify', 'Data periodik berhasil disimpan.');
+        $this->reset(['weight', 'height', 'head_circumference', 'semester', 'hasExistingPeriodicData', 'periodicDataLastUpdated']);
+        
+        session()->flash('success', 'Data periodik berhasil disimpan!');
+        $this->dispatch('periodic-saved');
     }
 
     public function delete(User $user): void
@@ -263,7 +329,7 @@ new class extends Component
 
 <div class="p-6">
     @if (session('success'))
-        <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 3000)" class="mb-6 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+        <div x-data="{ show: true }" x-show="show"  class="mb-6 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
             <div class="flex items-center gap-3">
                 <flux:icon icon="check-circle" class="w-5 h-5 text-green-600 dark:text-green-400" />
                 <span class="text-green-800 dark:text-green-200">{{ session('success') }}</span>
@@ -281,7 +347,7 @@ new class extends Component
             <flux:input wire:model.live.debounce.300ms="search" placeholder="Cari siswa..." icon="magnifying-glass" class="w-64" />
             
             <flux:modal.trigger name="student-modal">
-                <flux:button variant="primary" icon="plus" wire:click="$set('editing', null)">Tambah Siswa</flux:button>
+                <flux:button variant="primary" icon="plus" wire:click="createNew">Tambah Siswa</flux:button>
             </flux:modal.trigger>
         </div>
     </div>
@@ -357,8 +423,8 @@ new class extends Component
         {{ $students->links() }}
     </div>
 
-    <flux:modal name="student-modal" class="max-w-3xl">
-        <form wire:submit="save" x-on:submit.prevent="$wire.save().then(() => $flux.modal('student-modal').close())" class="space-y-8">
+    <flux:modal name="student-modal" class="max-w-3xl" x-on:student-saved.window="$flux.modal('student-modal').close()">
+        <form wire:submit="save" class="space-y-8">
             <div class="flex items-start justify-between">
                 <div>
                     <flux:heading size="lg">{{ $editing ? 'Edit Profil Siswa' : 'Tambah Siswa Baru' }}</flux:heading>
@@ -392,8 +458,8 @@ new class extends Component
                     <div class="space-y-4">
                         <flux:heading size="md" class="border-b pb-1">Identitas Siswa</flux:heading>
                         
-                        <flux:input wire:model="name" label="Nama Lengkap" required />
-                        <flux:input wire:model="email" label="Email" type="email" required />
+                        <flux:input wire:model="name" label="Nama Lengkap" />
+                        <flux:input wire:model="email" label="Email" type="email" />
                         
                         <div class="grid grid-cols-2 gap-3">
                             <flux:input wire:model="nis" label="NIS" />
@@ -459,21 +525,40 @@ new class extends Component
         </form>
     </flux:modal>
 
-    <flux:modal name="periodic-modal" class="max-w-md">
+    <flux:modal name="periodic-modal" class="max-w-md" x-on:periodic-saved.window="$flux.modal('periodic-modal').close()">
         <form wire:submit.prevent="savePeriodic({{ $editing?->latestProfile?->profileable_id ?? 0 }})" class="space-y-6">
             <div>
                 <flux:heading size="lg">Data Periodik Siswa</flux:heading>
                 <flux:subheading>Input data berat badan, tinggi, dan lingkar kepala.</flux:subheading>
+                
+                @if($hasExistingPeriodicData)
+                    <div class="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                        <div class="flex items-center gap-2">
+                            <flux:icon icon="information-circle" class="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                            <div>
+                                <span class="text-sm font-medium text-blue-800 dark:text-blue-200">Data sudah ada</span>
+                                <span class="text-xs text-blue-600 dark:text-blue-400 block">Terakhir diupdate {{ $periodicDataLastUpdated }}</span>
+                            </div>
+                        </div>
+                    </div>
+                @else
+                    <div class="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                        <div class="flex items-center gap-2">
+                            <flux:icon icon="exclamation-triangle" class="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                            <span class="text-sm font-medium text-amber-800 dark:text-amber-200">Belum ada data untuk semester ini</span>
+                        </div>
+                    </div>
+                @endif
             </div>
 
             <div class="space-y-4">
-                <flux:select wire:model="semester" label="Semester">
+                <flux:select wire:model.live="semester" label="Semester">
                     <option value="1">Ganjil (1)</option>
                     <option value="2">Genap (2)</option>
                 </flux:select>
 
-                <flux:input type="number" step="0.1" wire:model="weight" label="Berat Badan (kg)" suffix="kg" />
-                <flux:input type="number" step="0.1" wire:model="height" label="Tinggi Badan (cm)" suffix="cm" />
+                <flux:input type="number" step="0.5" wire:model="weight" label="Berat Badan (kg)" suffix="kg" />
+                <flux:input type="number" step="1" wire:model="height" label="Tinggi Badan (cm)" suffix="cm" />
                 <flux:input type="number" step="0.1" wire:model="head_circumference" label="Lingkar Kepala (cm)" suffix="cm" />
             </div>
 
@@ -608,6 +693,45 @@ new class extends Component
                         </div>
                     </div>
                 </div>
+
+                @php
+                    $periodicRecords = $viewProfile?->periodicRecords()
+                        ->with('academicYear')
+                        ->orderBy('academic_year_id', 'desc')
+                        ->orderBy('semester', 'desc')
+                        ->limit(3)
+                        ->get();
+                @endphp
+
+                @if($periodicRecords && $periodicRecords->count() > 0)
+                    <div class="pt-6 border-t border-zinc-200 dark:border-zinc-700">
+                        <flux:heading size="md" class="mb-4">Data Periodik Terbaru</flux:heading>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            @foreach($periodicRecords as $record)
+                                <div class="p-4 bg-zinc-50 dark:bg-zinc-800 rounded-lg">
+                                    <div class="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+                                        {{ $record->academicYear->name }} - Semester {{ $record->semester }}
+                                    </div>
+                                    <div class="space-y-2">
+                                        <div class="flex justify-between">
+                                            <span class="text-sm text-zinc-600 dark:text-zinc-400">Berat:</span>
+                                            <span class="font-medium">{{ $record->weight }} kg</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-sm text-zinc-600 dark:text-zinc-400">Tinggi:</span>
+                                            <span class="font-medium">{{ $record->height }} cm</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-sm text-zinc-600 dark:text-zinc-400">Ling. Kepala:</span>
+                                            <span class="font-medium">{{ $record->head_circumference }} cm</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
 
                 <div class="flex justify-end gap-2 pt-4 border-t border-zinc-200 dark:border-zinc-700">
                     <flux:modal.close>
