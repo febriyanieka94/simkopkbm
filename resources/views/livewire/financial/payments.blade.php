@@ -205,7 +205,7 @@ new class extends Component {
                     </div>
 
                     <div class="mt-8 flex justify-end">
-                        <flux:button variant="primary" size="lg" icon="check" wire:click="recordPayment">Simpan Pembayaran</flux:button>
+                        <flux:button variant="primary" icon="check" wire:click="recordPayment">Simpan Pembayaran</flux:button>
                     </div>
                 </div>
             @endif
